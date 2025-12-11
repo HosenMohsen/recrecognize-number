@@ -26,7 +26,6 @@ function endPosition() {
 function draw(e) {
     if (!isDrawing) return;
     
-    // Récupérer la position souris ou touch
     const rect = canvas.getBoundingClientRect();
     const clientX = e.clientX || e.touches[0].clientX;
     const clientY = e.clientY || e.touches[0].clientY;
@@ -37,7 +36,6 @@ function draw(e) {
     ctx.moveTo(clientX - rect.left, clientY - rect.top);
 }
 
-// Événements Souris
 canvas.addEventListener('mousedown', startPosition);
 canvas.addEventListener('mouseup', endPosition);
 canvas.addEventListener('mousemove', draw);
@@ -46,11 +44,9 @@ canvas.addEventListener('touchstart', startPosition);
 canvas.addEventListener('touchend', endPosition);
 canvas.addEventListener('touchmove', draw);
 
-// --- 1. CHARGEMENT DU MODÈLE ONNX ---
 async function loadModel() {
     try {
-        // Utilisation de l'API ort (onnxruntime)
-        // 'wasm' est le backend par défaut (WebAssembly), compatible partout.
+    
         session = await ort.InferenceSession.create('./model.onnx', { executionProviders: ['wasm'] });
         
         document.getElementById('status').innerText = "Modèle prêt ! (WASM)";
@@ -69,34 +65,32 @@ function clearCanvas() {
     ctx.beginPath();
 }
 
-// --- 2. PRÉTRAITEMENT DE L'IMAGE ---
 function processImage() {
-    // 1. Redimensionner l'image du canvas (280x280) vers (28x28)
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = 28;
     tempCanvas.height = 28;
     const tempCtx = tempCanvas.getContext('2d');
+    
+    tempCtx.imageSmoothingEnabled = true; 
     tempCtx.drawImage(canvas, 0, 0, 28, 28);
     
-    // 2. Récupérer les données brutes des pixels
     const imageData = tempCtx.getImageData(0, 0, 28, 28);
-    const data = imageData.data; // Tableau [r, g, b, a, r, g, b, a, ...]
+    const data = imageData.data; 
     
-    // 3. Convertir en Float32, Normaliser (0 à 1), puis Binariser (0 ou 1)
     const input = new Float32Array(28 * 28);
+    
+    const mean = 0.1307;
+    const std = 0.3081;
+
     for (let i = 0; i < 28 * 28; i++) {
-        // On prend juste le canal Rouge (puisque c'est gris/blanc/noir)
-        // data[i*4] = Rouge. 
-        const normalizedValue = data[i * 4] / 255.0;
-        // Binarisation : si > 0 alors 1, sinon 0
-        input[i] = normalizedValue > 0 ? 1 : 0;
+        let val = data[i * 4] / 255.0;
+        
+        input[i] = (val - mean) / std;
     }
     
     return input;
 }
 
-// --- 3. INFÉRENCE (PRÉDICTION) ---
-// --- 3. INFÉRENCE (PRÉDICTION) ---
 async function runInference() {
     if (!session) {
         alert("Le modèle n'est pas encore chargé !");
@@ -105,34 +99,25 @@ async function runInference() {
 
     const inputData = processImage();
 
-    // Création du tenseur ONNX [1, 28, 28]
-    const dims = [1, 28, 28]; 
+    const dims = [1, 1, 28, 28]; 
     const tensor = new ort.Tensor('float32', inputData, dims);
 
-    // --- CORRECTION MAJEURE ICI ---
-    
-    // 1. Récupérer dynamiquement les noms définis dans le modèle
-    // (Cela évite les erreurs si vous avez nommé l'entrée "input" ou "x" en Python)
+
     const inputName = session.inputNames[0];  
     const outputName = session.outputNames[0];
 
-    // 2. Préparer l'objet feeds avec le BON nom d'entrée
     const feeds = {};
     feeds[inputName] = tensor; 
 
     console.log(`Entrée utilisée: ${inputName}, Sortie attendue: ${outputName}`);
 
     try {
-        // Exécution
         const start = performance.now();
         const results = await session.run(feeds);
         const end = performance.now();
 
-        // 3. Lire le résultat avec le BON nom de sortie
-        // Au lieu de faire results.output.data, on fait results[outputName].data
         const output = results[outputName].data;
 
-        // Trouver l'index max (Argmax)
         const maxIndex = output.indexOf(Math.max(...output));
         
         document.getElementById('result').innerText = `Prédiction : ${maxIndex}`;
